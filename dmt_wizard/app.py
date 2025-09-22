@@ -139,6 +139,10 @@ def show_summary(
     variant_parent: str,
     website: str,
     new_pdp: bool,
+    prod_code: str,
+    cat_enabled: bool,
+    cat_site: str,
+    cat_str: str,
 ) -> bool:
     table = Table(title="Summary", show_lines=False)
     table.add_column("Field", style="cyan", no_wrap=True)
@@ -152,8 +156,15 @@ def show_summary(
         table.add_row("Create Part?", "Yes" if part_enabled else "No")
         if part_enabled:
             table.add_row("Variant Parent", variant_parent)
-            table.add_row("Website", website)
+            table.add_row("Part Website", website)
             table.add_row("New PDP?", "Yes" if new_pdp else "No")
+            if new_pdp:
+                table.add_row("ProdCode", prod_code or "(none)")
+        # Category details
+        table.add_row("Category?", "Yes" if cat_enabled else "No")
+        if cat_enabled:
+            table.add_row("Category Website", cat_site)
+            table.add_row("Category Path (Key3)", cat_str)
 
     console.print(Panel.fit(table, title="Please confirm", border_style="green"))
     return inquirer.confirm(message="Proceed?", default=True).execute()
@@ -332,7 +343,12 @@ def run() -> None:
         ud09_sort_map = None
         cat_opts = None
 
-    if not show_summary(operation, files, import_type, include_tables, part_enabled, variant_parent, website, new_pdp):
+    # Prepare category flags for summary
+    cat_enabled = bool(cat_opts)
+    cat_site = cat_opts.get("website", "") if cat_enabled else ""
+    cat_str = cat_opts.get("category", "") if cat_enabled else ""
+
+    if not show_summary(operation, files, import_type, include_tables, part_enabled, variant_parent, website, new_pdp, prod_code, cat_enabled, cat_site, cat_str):
         console.print("Cancelled.", style="yellow")
         return
 
