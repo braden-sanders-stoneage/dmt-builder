@@ -131,3 +131,38 @@ def build_part_table(df11: pd.DataFrame, variant_parent: str, website: str, new_
     return df_part
 
 
+def build_category_ud08(company: str, website: str, category_string: str) -> pd.DataFrame:
+    parent = "-".join([seg for seg in str(category_string).split("-") if seg][: -1]) if "-" in str(category_string) else ""
+    df = pd.DataFrame([
+        {
+            "Company": company or "SAINC",
+            "Key1": "Category",
+            "Key2": website,
+            "Key3": category_string,
+            "Key4": parent,
+            "Key5": "",
+            "Character01": "COPY NEEDED",
+            "Character04": "COPY NEEDED",
+            "Checkbox01": True,
+        }
+    ])
+    return df[["Company", "Key1", "Key2", "Key3", "Key4", "Key5", "Character01", "Character04", "Checkbox01"]]
+
+
+def build_category_ud11_assignments(df11: pd.DataFrame, website: str, category_string: str) -> pd.DataFrame:
+    parts = (
+        df11[["Company", "Key4"]]
+        .rename(columns={"Key4": "PartNum"})
+        .assign(PartNum=lambda d: d["PartNum"].fillna("").astype(str))
+    )
+    parts = parts[parts["PartNum"] != ""].drop_duplicates(subset=["Company", "PartNum"]).reset_index(drop=True)
+    if parts.empty:
+        return pd.DataFrame(columns=["Company", "Key1", "Key2", "Key3", "Key4", "Key5"])
+    out = parts.rename(columns={"PartNum": "Key4"}).copy()
+    out["Key1"] = "Category"
+    out["Key2"] = website
+    out["Key3"] = category_string
+    out["Key5"] = ""
+    return out[["Company", "Key1", "Key2", "Key3", "Key4", "Key5"]]
+
+

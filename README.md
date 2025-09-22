@@ -64,20 +64,5 @@ python Run_DMT_Wizard.py
 - CSV inputs are read with `pandas.read_csv`; Excel with `pandas.read_excel`.
 - The first six columns of your file are used and renamed to the UD11 schema; extra columns are ignored.
 
-### Troubleshooting
-- **ModuleNotFoundError (e.g., rich, InquirerPy)**: You likely installed packages in a different Python than the one running the script.
-  - Install with the same interpreter you run: 
-```bash
-py -3.12 -m pip install -r requirements.txt
-py -3.12 Run_DMT_Wizard.py
-```
-  - Or specify your exact path: 
-```bash
-"C:\\Users\\<you>\\AppData\\Local\\Programs\\Python\\Python312\\python.exe" -m pip install -r requirements.txt
-"C:\\Users\\<you>\\AppData\\Local\\Programs\\Python\\Python312\\python.exe" Run_DMT_Wizard.py
-```
-- **Excel read errors**: Ensure the file isn’t open/locked and that the first six columns contain your UD keys.
-- **Unexpected outputs**: Verify type (Variant vs Attribute) and the selected tables. Re-run and adjust.
-
 ### Dependencies
 - `pandas`, `rich`, `InquirerPy`, `openpyxl` (Excel), standard library only otherwise.
