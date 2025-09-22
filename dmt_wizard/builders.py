@@ -86,7 +86,7 @@ def build_attribute_ud_tables(df11: pd.DataFrame) -> dict[str, pd.DataFrame]:
     return {"UD11": ud11, "UD10": ud10, "UD09": ud09}
 
 
-def build_part_table(df11: pd.DataFrame, variant_parent: str, website: str, new_pdp: bool) -> pd.DataFrame:
+def build_part_table(df11: pd.DataFrame, variant_parent: str, website: str, new_pdp: bool, prod_code: str) -> pd.DataFrame:
     df11 = _ensure_str(df11, ["Company", "Key2", "Key4"])  # only the needed columns
 
     rows = []
@@ -104,6 +104,11 @@ def build_part_table(df11: pd.DataFrame, variant_parent: str, website: str, new_
             "Character11": "",
             "Character12": "show",
             "Character13": website,
+            # New PDP defaults (parent)
+            "PartDescription": "This is a TEMPORARY test part for the DXP",
+            "ClassID": "FG",
+            "ProdCode": prod_code,
+            "UserChar1": "Introduction",
         })
 
     child = df11[["Company", "Key2", "Key4"]].rename(columns={"Key4": "PartNum"}).copy()
@@ -118,16 +123,29 @@ def build_part_table(df11: pd.DataFrame, variant_parent: str, website: str, new_
         child["Character11"] = variant_parent
         child["Character12"] = "show"
         child["Character13"] = website
+        if new_pdp:
+            # New PDP defaults (children)
+            child["PartDescription"] = "This is a TEMPORARY test part for the DXP"
+            child["ClassID"] = "FG"
+            child["ProdCode"] = prod_code
+            child["UserChar1"] = "Introduction"
         child = child[[
-            "Company", "PartNum", "Character05", "Character06", "Character08",
+            "Company", "PartNum",
+            # Optional new PDP block (will be added later if requested)
+            "Character05", "Character06", "Character08",
             "Checkbox11", "Character10", "Character11", "Character12", "Character13",
+            *(["PartDescription", "ClassID", "ProdCode", "UserChar1"] if new_pdp else []),
         ]]
         rows.extend(child.to_dict(orient="records"))
 
-    df_part = pd.DataFrame(rows, columns=[
-        "Company", "PartNum", "Character05", "Character06", "Character08",
+    base_cols = [
+        "Company", "PartNum",
+        "Character05", "Character06", "Character08",
         "Checkbox11", "Character10", "Character11", "Character12", "Character13",
-    ])
+    ]
+    extra_cols = ["PartDescription", "ClassID", "ProdCode", "UserChar1"] if new_pdp else []
+    all_cols = base_cols + extra_cols
+    df_part = pd.DataFrame(rows, columns=all_cols)
     return df_part
 
 
@@ -143,26 +161,22 @@ def build_category_ud08(company: str, website: str, category_string: str) -> pd.
             "Key5": "",
             "Character01": "COPY NEEDED",
             "Character04": "COPY NEEDED",
-            "Checkbox01": True,
         }
     ])
-    return df[["Company", "Key1", "Key2", "Key3", "Key4", "Key5", "Character01", "Character04", "Checkbox01"]]
+    return df[["Company", "Key1", "Key2", "Key3", "Key4", "Key5", "Character01", "Character04"]]
 
 
-def build_category_ud11_assignments(df11: pd.DataFrame, website: str, category_string: str) -> pd.DataFrame:
-    parts = (
-        df11[["Company", "Key4"]]
-        .rename(columns={"Key4": "PartNum"})
-        .assign(PartNum=lambda d: d["PartNum"].fillna("").astype(str))
-    )
-    parts = parts[parts["PartNum"] != ""].drop_duplicates(subset=["Company", "PartNum"]).reset_index(drop=True)
-    if parts.empty:
-        return pd.DataFrame(columns=["Company", "Key1", "Key2", "Key3", "Key4", "Key5"])
-    out = parts.rename(columns={"PartNum": "Key4"}).copy()
-    out["Key1"] = "Category"
-    out["Key2"] = website
-    out["Key3"] = category_string
-    out["Key5"] = ""
-    return out[["Company", "Key1", "Key2", "Key3", "Key4", "Key5"]]
+def build_category_ud11_for_parent(company: str, parent_part_num: str, website: str, category_string: str) -> pd.DataFrame:
+    if not company:
+        company = "SAINC"
+    data = [{
+        "Company": company,
+        "Key1": "Category",
+        "Key2": website,
+        "Key3": category_string,
+        "Key4": parent_part_num,
+        "Key5": "",
+    }]
+    return pd.DataFrame(data, columns=["Company", "Key1", "Key2", "Key3", "Key4", "Key5"])
 
 

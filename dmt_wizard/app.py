@@ -19,7 +19,7 @@ from .builders import (
     build_attribute_ud_tables,
     build_part_table,
     build_category_ud08,
-    build_category_ud11_assignments,
+    build_category_ud11_for_parent,
 )
 from .playlist import build_playlist_df
 
@@ -81,10 +81,10 @@ def prompt_tables(import_type: str) -> Set[str]:
     return set(selected)
 
 
-def prompt_part_options() -> Tuple[bool, str, str, bool]:
+def prompt_part_options() -> Tuple[bool, str, str, bool, str]:
     create_part = inquirer.confirm(message="Create Part file?", default=True).execute()
     if not create_part:
-        return False, "", "", False
+        return False, "", "", False, ""
 
     variant_parent = inquirer.text(message="Variant Parent Part ID:").execute().strip()
     website = inquirer.select(
@@ -93,7 +93,8 @@ def prompt_part_options() -> Tuple[bool, str, str, bool]:
         default="SA",
     ).execute()
     new_pdp = inquirer.confirm(message="Create new PDP?", default=True).execute()
-    return True, variant_parent, website, new_pdp
+    prod_code = inquirer.text(message="ProdCode (for new PDP parts):").execute().strip()
+    return True, variant_parent, website, new_pdp, prod_code
 
 
 def prompt_variant_ud09_sort(keys3: List[str]) -> Dict[str, int]:
@@ -180,6 +181,10 @@ def celebrate_success(output_dir: str | None, playlist_path: str) -> None:
         "⚠ WARNING! Before importing, replace any 'COPY NEEDED' values in Categories_UD08 and Part!"
     )
     console.print(Panel.fit(warning_text, border_style="orange1"))
+    part_warning = (
+        "⚠ WARNING! Review Part fields (PartDescription, ClassID, ProdCode) and update if necessary before import."
+    )
+    console.print(Panel.fit(part_warning, border_style="orange1"))
 
 
 def process_single(
@@ -192,6 +197,7 @@ def process_single(
     new_pdp: bool,
     ud09_sort_map: Dict[str, int] | None,
     cat_opts: Dict[str, str] | None,
+    prod_code: str,
 ) -> Tuple[str, Dict[str, str]]:
     df11 = read_excel_normalized(excel_path)
     stem, base_dir = get_stem_and_dir(excel_path)
@@ -222,7 +228,7 @@ def process_single(
 
         # Part (variant + requested, only for add runs, handled by caller)
         if import_type == "variant" and create_part:
-            df_part = build_part_table(df11_out, variant_parent, website, new_pdp)
+            df_part = build_part_table(df11_out, variant_parent, website, new_pdp, prod_code)
             csv_path = os.path.join(out_dir, f"{stem}_Part.csv")
             write_csv(df_part, csv_path)
             written["Part"] = csv_path
@@ -239,8 +245,10 @@ def process_single(
             write_csv(df_cat08, path08)
             written["UD08_Categories"] = path08
 
-            # UD11 assignments
-            df_cat11 = build_category_ud11_assignments(df11_out, cat_site, cat_str)
+            # UD11 assignment (parent only)
+            parent_part = variant_parent if variant_parent else inquirer.text(message="Parent Part ID for category:").execute().strip()
+            company_val = df11_out["Company"].iloc[0] if not df11_out.empty else "SAINC"
+            df_cat11 = build_category_ud11_for_parent(company_val, parent_part, cat_site, cat_str)
             path11 = os.path.join(out_dir, f"{stem}_Categories_UD11.csv")
             write_csv(df_cat11, path11)
             written["UD11_Categories"] = path11
@@ -308,16 +316,18 @@ def run() -> None:
     variant_parent = ""
     website = ""
     new_pdp = False
+    prod_code = ""
     cat_opts: Dict[str, str] | None = None
     if import_type == "variant":
-        # Select UD09 sort order BEFORE Part prompts so inputs are clearly visible
+        # Select UD09 sort order BEFORE other prompts
         ud09_sort_map = prompt_variant_ud09_sort(df11_detect["Key3"].dropna().astype(str).tolist())
-        # Category step (optional)
+        # Part first so we have the parent ID
+        part_enabled, variant_parent, website, new_pdp, prod_code = prompt_part_options()
+        # Category step (optional) – now we can use the parent
         if inquirer.confirm(message="Add/assign a category?", default=True).execute():
             cat_site = inquirer.select(message="Website for category:", choices=["SA", "SW"], default="SA").execute()
             cat_str = inquirer.text(message="Category string (Key3):").execute().strip()
             cat_opts = {"website": cat_site, "category": cat_str}
-        part_enabled, variant_parent, website, new_pdp = prompt_part_options()
     else:
         ud09_sort_map = None
         cat_opts = None
@@ -332,22 +342,22 @@ def run() -> None:
 
     # Execute runs
     if operation == "add":
-        stem, written = process_single(files[0], import_type, include_tables, part_enabled, variant_parent, website, new_pdp, ud09_sort_map, cat_opts)
+        stem, written = process_single(files[0], import_type, include_tables, part_enabled, variant_parent, website, new_pdp, ud09_sort_map, cat_opts, prod_code)
         playlist_stem = stem
         playlist_dir = os.path.dirname(list(written.values())[0]) if written else os.path.dirname(files[0])
         for path in written.values():
             playlist_entries.append((path, "add"))
     elif operation == "delete":
-        stem, written = process_single(files[0], import_type, include_tables, False, variant_parent, website, new_pdp, ud09_sort_map, cat_opts)
+        stem, written = process_single(files[0], import_type, include_tables, False, variant_parent, website, new_pdp, ud09_sort_map, cat_opts, prod_code)
         playlist_stem = stem
         playlist_dir = os.path.dirname(list(written.values())[0]) if written else os.path.dirname(files[0])
         for path in written.values():
             playlist_entries.append((path, "delete"))
     else:  # both
         # delete first
-        del_stem, del_written = process_single(files[0], import_type, include_tables, False, variant_parent, website, new_pdp, ud09_sort_map, cat_opts)
+        del_stem, del_written = process_single(files[0], import_type, include_tables, False, variant_parent, website, new_pdp, ud09_sort_map, cat_opts, prod_code)
         # add second (Part only on add)
-        add_stem, add_written = process_single(files[1], import_type, include_tables, part_enabled, variant_parent, website, new_pdp, ud09_sort_map, cat_opts)
+        add_stem, add_written = process_single(files[1], import_type, include_tables, part_enabled, variant_parent, website, new_pdp, ud09_sort_map, cat_opts, prod_code)
         playlist_stem = del_stem
         playlist_dir = os.path.dirname(list(del_written.values())[0]) if del_written else os.path.dirname(files[0])
         for path in del_written.values():
