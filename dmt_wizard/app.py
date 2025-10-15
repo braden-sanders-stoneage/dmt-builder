@@ -28,7 +28,6 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.progress import Progress
 from InquirerPy import inquirer
-from rich.live import Live
 
 
 console = Console()
@@ -171,22 +170,10 @@ def show_summary(
 
 
 def celebrate_success(output_dir: str | None, playlist_path: str) -> None:
-    frames = ["😄", "😃", "🙂", "😃"]
-    def message(face: str) -> Panel:
-        return Panel.fit(
-            f"{face} Success!\n\nOutput folder:\n- {output_dir}\nPlaylist:\n- {playlist_path}\n\n:tada:  :sparkles:  :confetti_ball:",
-            border_style="green",
-        )
-    # Keep the final frame on screen (transient=False)
-    with Live(refresh_per_second=10, transient=False) as live:
-        for i in range(24):
-            live.update(message(frames[i % len(frames)]))
-            time.sleep(0.08)
-        # Persist a static celebration panel
-        live.update(Panel.fit(
-            f"🎉 Success!\n\nOutput folder:\n- {output_dir}\nPlaylist:\n- {playlist_path}\n\nEnjoy! :smiley:",
-            border_style="green",
-        ))
+    console.print(Panel.fit(
+        f"🎉 Success!\n\nOutput folder:\n- {output_dir}\nPlaylist:\n- {playlist_path}",
+        border_style="green",
+    ))
     # Big orange warning reminder
     warning_text = (
         "⚠ WARNING! Before importing, replace any 'COPY NEEDED' values in Categories_UD08 and Part!"
@@ -329,19 +316,19 @@ def run() -> None:
     new_pdp = False
     prod_code = ""
     cat_opts: Dict[str, str] | None = None
-    if import_type == "variant":
-        # Select UD09 sort order BEFORE other prompts
-        ud09_sort_map = prompt_variant_ud09_sort(df11_detect["Key3"].dropna().astype(str).tolist())
-        # Part first so we have the parent ID
-        part_enabled, variant_parent, website, new_pdp, prod_code = prompt_part_options()
-        # Category step (optional) – now we can use the parent
-        if inquirer.confirm(message="Add/assign a category?", default=True).execute():
-            cat_site = inquirer.select(message="Website for category:", choices=["SA", "SW"], default="SA").execute()
-            cat_str = inquirer.text(message="Category string (Key3):").execute().strip()
-            cat_opts = {"website": cat_site, "category": cat_str}
-    else:
-        ud09_sort_map = None
-        cat_opts = None
+    ud09_sort_map = None
+    
+    if operation != "delete":
+        if import_type == "variant":
+            # Select UD09 sort order BEFORE other prompts
+            ud09_sort_map = prompt_variant_ud09_sort(df11_detect["Key3"].dropna().astype(str).tolist())
+            # Part first so we have the parent ID
+            part_enabled, variant_parent, website, new_pdp, prod_code = prompt_part_options()
+            # Category step (optional) – now we can use the parent
+            if inquirer.confirm(message="Add/assign a category?", default=True).execute():
+                cat_site = inquirer.select(message="Website for category:", choices=["SA", "SW"], default="SA").execute()
+                cat_str = inquirer.text(message="Category string (Key3):").execute().strip()
+                cat_opts = {"website": cat_site, "category": cat_str}
 
     # Prepare category flags for summary
     cat_enabled = bool(cat_opts)
