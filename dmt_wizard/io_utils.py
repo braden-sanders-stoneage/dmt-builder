@@ -16,13 +16,16 @@ def pick_excel_file(title: str = "Select source file") -> str:
 
     root = tk.Tk()
     root.withdraw()
+    root.attributes("-topmost", True)
     root.update()
     filetypes = [
+        ("Source files", "*.xlsx *.xls *.csv"),
         ("Excel files", "*.xlsx *.xls"),
         ("CSV files", "*.csv"),
         ("All files", "*.*"),
     ]
-    path = filedialog.askopenfilename(title=title, filetypes=filetypes)
+    path = filedialog.askopenfilename(title=title, filetypes=filetypes, parent=root)
+    root.update()
     root.destroy()
     return path or ""
 

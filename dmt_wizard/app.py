@@ -21,7 +21,7 @@ from .builders import (
     build_category_ud08,
     build_category_ud11_for_parent,
 )
-from .playlist import build_playlist_df
+from .playlist import build_playlist_df, build_playlist_name
 
 from rich.console import Console
 from rich.panel import Panel
@@ -142,6 +142,7 @@ def show_summary(
     cat_enabled: bool,
     cat_site: str,
     cat_str: str,
+    cat_is_new: bool,
 ) -> bool:
     table = Table(title="Summary", show_lines=False)
     table.add_column("Field", style="cyan", no_wrap=True)
@@ -162,6 +163,7 @@ def show_summary(
         # Category details
         table.add_row("Category?", "Yes" if cat_enabled else "No")
         if cat_enabled:
+            table.add_row("Category Type", "New (UD08 + UD11)" if cat_is_new else "Existing (UD11 only)")
             table.add_row("Category Website", cat_site)
             table.add_row("Category Path (Key3)", cat_str)
 
@@ -236,14 +238,16 @@ def process_single(
     if import_type == "variant" and cat_opts:
         cat_site = cat_opts.get("website", "").strip()
         cat_str = cat_opts.get("category", "").strip()
+        cat_is_new = cat_opts.get("is_new", False)
         if cat_site and cat_str:
-            # UD08 category definition
-            df_cat08 = build_category_ud08(df11_out["Company"].iloc[0] if not df11_out.empty else "SAINC", cat_site, cat_str)
-            path08 = os.path.join(out_dir, f"{stem}_Categories_UD08.csv")
-            write_csv(df_cat08, path08)
-            written["UD08_Categories"] = path08
+            # UD08 category definition (only for new categories)
+            if cat_is_new:
+                df_cat08 = build_category_ud08(df11_out["Company"].iloc[0] if not df11_out.empty else "SAINC", cat_site, cat_str)
+                path08 = os.path.join(out_dir, f"{stem}_Categories_UD08.csv")
+                write_csv(df_cat08, path08)
+                written["UD08_Categories"] = path08
 
-            # UD11 assignment (parent only)
+            # UD11 assignment (always created when working with categories)
             parent_part = variant_parent if variant_parent else inquirer.text(message="Parent Part ID for category:").execute().strip()
             company_val = df11_out["Company"].iloc[0] if not df11_out.empty else "SAINC"
             df_cat11 = build_category_ud11_for_parent(company_val, parent_part, cat_site, cat_str)
@@ -325,34 +329,40 @@ def run() -> None:
             # Part first so we have the parent ID
             part_enabled, variant_parent, website, new_pdp, prod_code = prompt_part_options()
             # Category step (optional) – now we can use the parent
-            if inquirer.confirm(message="Add/assign a category?", default=True).execute():
+            if inquirer.confirm(message="Work with categories?", default=True).execute():
+                cat_type = inquirer.select(
+                    message="Category type:",
+                    choices=[
+                        {"name": "New category (create UD08 + UD11)", "value": "new"},
+                        {"name": "Existing category (UD11 only)", "value": "existing"},
+                    ],
+                    default="new",
+                ).execute()
                 cat_site = inquirer.select(message="Website for category:", choices=["SA", "SW"], default="SA").execute()
                 cat_str = inquirer.text(message="Category string (Key3):").execute().strip()
-                cat_opts = {"website": cat_site, "category": cat_str}
+                cat_opts = {"website": cat_site, "category": cat_str, "is_new": cat_type == "new"}
 
     # Prepare category flags for summary
     cat_enabled = bool(cat_opts)
     cat_site = cat_opts.get("website", "") if cat_enabled else ""
     cat_str = cat_opts.get("category", "") if cat_enabled else ""
+    cat_is_new = cat_opts.get("is_new", False) if cat_enabled else False
 
-    if not show_summary(operation, files, import_type, include_tables, part_enabled, variant_parent, website, new_pdp, prod_code, cat_enabled, cat_site, cat_str):
+    if not show_summary(operation, files, import_type, include_tables, part_enabled, variant_parent, website, new_pdp, prod_code, cat_enabled, cat_site, cat_str, cat_is_new):
         console.print("Cancelled.", style="yellow")
         return
 
     playlist_entries: List[Tuple[str, str]] = []  # (filepath, op)
-    playlist_stem = None
     playlist_dir = None
 
     # Execute runs
     if operation == "add":
         stem, written = process_single(files[0], import_type, include_tables, part_enabled, variant_parent, website, new_pdp, ud09_sort_map, cat_opts, prod_code)
-        playlist_stem = stem
         playlist_dir = os.path.dirname(list(written.values())[0]) if written else os.path.dirname(files[0])
         for path in written.values():
             playlist_entries.append((path, "add"))
     elif operation == "delete":
         stem, written = process_single(files[0], import_type, include_tables, False, variant_parent, website, new_pdp, ud09_sort_map, cat_opts, prod_code)
-        playlist_stem = stem
         playlist_dir = os.path.dirname(list(written.values())[0]) if written else os.path.dirname(files[0])
         for path in written.values():
             playlist_entries.append((path, "delete"))
@@ -361,7 +371,6 @@ def run() -> None:
         del_stem, del_written = process_single(files[0], import_type, include_tables, False, variant_parent, website, new_pdp, ud09_sort_map, cat_opts, prod_code)
         # add second (Part only on add)
         add_stem, add_written = process_single(files[1], import_type, include_tables, part_enabled, variant_parent, website, new_pdp, ud09_sort_map, cat_opts, prod_code)
-        playlist_stem = del_stem
         playlist_dir = os.path.dirname(list(del_written.values())[0]) if del_written else os.path.dirname(files[0])
         for path in del_written.values():
             playlist_entries.append((path, "delete"))
@@ -369,6 +378,7 @@ def run() -> None:
             playlist_entries.append((path, "add"))
 
     # Build playlist
+    playlist_stem = build_playlist_name(operation, files)
     include_for_playlist = include_tables.copy()
     df_playlist = build_playlist_df(playlist_entries, include_for_playlist)
     playlist_path = os.path.join(os.path.dirname(playlist_dir), f"{playlist_stem}_PLAYLIST.csv") if playlist_dir else os.path.join(os.path.dirname(files[0]), f"{playlist_stem}_PLAYLIST.csv")

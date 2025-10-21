@@ -1,9 +1,24 @@
 from __future__ import annotations
 
 import os
-from typing import Iterable, Tuple, Set
+from typing import Iterable, Tuple, Set, List
 
 import pandas as pd
+
+
+def build_playlist_name(operation: str, file_paths: List[str]) -> str:
+    stems = []
+    for path in file_paths:
+        base = os.path.basename(path)
+        stem = os.path.splitext(base)[0]
+        stems.append(stem)
+    
+    if operation == "add":
+        return f"ADD_{stems[0]}"
+    elif operation == "delete":
+        return f"DEL_{stems[0]}"
+    else:
+        return f"DEL_{stems[0]}_ADD_{stems[1]}"
 
 
 def _table_from_path(path: str) -> str:
