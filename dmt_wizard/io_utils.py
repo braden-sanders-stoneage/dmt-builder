@@ -30,6 +30,23 @@ def pick_excel_file(title: str = "Select source file") -> str:
     return path or ""
 
 
+def pick_output_folder(title: str = "Select output folder") -> str:
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except Exception:
+        return ""
+
+    root = tk.Tk()
+    root.withdraw()
+    root.attributes("-topmost", True)
+    root.update()
+    folder = filedialog.askdirectory(title=title, parent=root)
+    root.update()
+    root.destroy()
+    return folder or ""
+
+
 def read_excel_normalized(path: str) -> pd.DataFrame:
     ext = os.path.splitext(path)[1].lower()
     if ext == ".csv":
@@ -55,6 +72,14 @@ def ensure_output_dir(base_dir: str, name: str) -> str:
 
 def write_csv(df: pd.DataFrame, path: str) -> None:
     df.to_csv(path, index=False, encoding='utf-8-sig')
+
+
+def sanitize_filename(name: str) -> str:
+    invalid_chars = '<>:"/\\|?*'
+    sanitized = name
+    for char in invalid_chars:
+        sanitized = sanitized.replace(char, '_')
+    return sanitized
 
 
 def get_stem_and_dir(path: str) -> Tuple[str, str]:

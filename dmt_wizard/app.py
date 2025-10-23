@@ -9,10 +9,12 @@ import pandas as pd
 
 from .io_utils import (
     pick_excel_file,
+    pick_output_folder,
     read_excel_normalized,
     ensure_output_dir,
     write_csv,
     get_stem_and_dir,
+    sanitize_filename,
 )
 from .builders import (
     build_variant_ud_tables,
@@ -191,7 +193,7 @@ def show_summary(
     prod_code: str,
     cat_enabled: bool,
     cat_site: str,
-    cat_str: str,
+    cat_list: List[str],
     cat_is_new: bool,
 ) -> bool:
     table = Table(title="Summary", show_lines=False)
@@ -216,7 +218,8 @@ def show_summary(
         if cat_enabled:
             table.add_row("Category Type", "New (UD08 + UD11)" if cat_is_new else "Existing (UD11 only)")
             table.add_row("Category Website", cat_site)
-            table.add_row("Category Path (Key3)", cat_str)
+            cat_display = f"{len(cat_list)} categories" if len(cat_list) > 1 else cat_list[0] if cat_list else "(none)"
+            table.add_row("Categories", cat_display)
 
     console.print(Panel.fit(table, title="Please confirm", border_style="green"))
     return inquirer.confirm(message="Proceed?", default=True).execute()
@@ -289,20 +292,22 @@ def process_single(
     # Category files (outside progress so prompts are clean)
     if import_type == "variant" and cat_opts:
         cat_site = cat_opts.get("website", "").strip()
-        cat_str = cat_opts.get("category", "").strip()
+        cat_list = cat_opts.get("categories", [])
         cat_is_new = cat_opts.get("is_new", False)
-        if cat_site and cat_str:
+        if cat_site and cat_list:
+            company_val = df11_out["Company"].iloc[0] if not df11_out.empty else "SAINC"
             # UD08 category definition (only for new categories)
             if cat_is_new:
-                df_cat08 = build_category_ud08(df11_out["Company"].iloc[0] if not df11_out.empty else "SAINC", cat_site, cat_str)
+                df_cat08_list = [build_category_ud08(company_val, cat_site, cat_str) for cat_str in cat_list]
+                df_cat08 = pd.concat(df_cat08_list, ignore_index=True)
                 path08 = os.path.join(out_dir, f"{stem}_Categories_UD08.csv")
                 write_csv(df_cat08, path08)
                 written["UD08_Categories"] = path08
 
             # UD11 assignment (always created when working with categories)
             parent_part = variant_parent if variant_parent else inquirer.text(message="Parent Part ID for category:").execute().strip()
-            company_val = df11_out["Company"].iloc[0] if not df11_out.empty else "SAINC"
-            df_cat11 = build_category_ud11_for_parent(company_val, parent_part, cat_site, cat_str)
+            df_cat11_list = [build_category_ud11_for_parent(company_val, parent_part, cat_site, cat_str) for cat_str in cat_list]
+            df_cat11 = pd.concat(df_cat11_list, ignore_index=True)
             path11 = os.path.join(out_dir, f"{stem}_Categories_UD11.csv")
             write_csv(df_cat11, path11)
             written["UD11_Categories"] = path11
@@ -343,12 +348,16 @@ def run_new_pdp_mode() -> None:
             default="new",
         ).execute()
         cat_site = inquirer.select(message="Website for category:", choices=["SA", "SW"], default="SA").execute()
-        cat_str = inquirer.text(message="Category string (Key3):").execute().strip()
-        cat_opts = {"website": cat_site, "category": cat_str, "is_new": cat_type == "new"}
+        cat_input = inquirer.text(
+            message="Category string(s) - paste multiple categories (one per line):",
+            multiline=True
+        ).execute().strip()
+        cat_list = [cat.strip() for cat in cat_input.split("\n") if cat.strip()]
+        cat_opts = {"website": cat_site, "categories": cat_list, "is_new": cat_type == "new"}
     
     cat_enabled = bool(cat_opts)
     cat_site = cat_opts.get("website", "") if cat_enabled else ""
-    cat_str = cat_opts.get("category", "") if cat_enabled else ""
+    cat_list = cat_opts.get("categories", []) if cat_enabled else []
     cat_is_new = cat_opts.get("is_new", False) if cat_enabled else False
     
     table = Table(title="Summary", show_lines=False)
@@ -365,7 +374,8 @@ def run_new_pdp_mode() -> None:
     if cat_enabled:
         table.add_row("Category Type", "New (UD08 + UD11)" if cat_is_new else "Existing (UD11 only)")
         table.add_row("Category Website", cat_site)
-        table.add_row("Category Path (Key3)", cat_str)
+        cat_display = f"{len(cat_list)} categories" if len(cat_list) > 1 else cat_list[0] if cat_list else "(none)"
+        table.add_row("Categories", cat_display)
     
     console.print(Panel.fit(table, title="Please confirm", border_style="green"))
     if not inquirer.confirm(message="Proceed?", default=True).execute():
@@ -373,28 +383,37 @@ def run_new_pdp_mode() -> None:
         return
     
     import os
-    out_dir = ensure_output_dir(os.getcwd(), f"{part_id}_OUTPUT")
+    console.print(Panel.fit("Select output folder", border_style="yellow"))
+    output_base = pick_output_folder(title="Select output folder")
+    if not output_base:
+        console.print("No folder selected. Exiting.", style="red")
+        return
+    
+    part_id_safe = sanitize_filename(part_id)
+    out_dir = ensure_output_dir(output_base, f"{part_id_safe}_OUTPUT")
     written: Dict[str, str] = {}
     
     company = "SAINC"
     df_part = build_single_pdp_part(company, part_id, is_new, part_desc, prod_code, website)
-    part_path = os.path.join(out_dir, f"{part_id}_Part.csv")
+    part_path = os.path.join(out_dir, f"{part_id_safe}_Part.csv")
     write_csv(df_part, part_path)
     written["Part"] = part_path
     
     if cat_opts:
         cat_site = cat_opts.get("website", "").strip()
-        cat_str = cat_opts.get("category", "").strip()
+        cat_list = cat_opts.get("categories", [])
         cat_is_new = cat_opts.get("is_new", False)
-        if cat_site and cat_str:
+        if cat_site and cat_list:
             if cat_is_new:
-                df_cat08 = build_category_ud08(company, cat_site, cat_str)
-                path08 = os.path.join(out_dir, f"{part_id}_Categories_UD08.csv")
+                df_cat08_list = [build_category_ud08(company, cat_site, cat_str) for cat_str in cat_list]
+                df_cat08 = pd.concat(df_cat08_list, ignore_index=True)
+                path08 = os.path.join(out_dir, f"{part_id_safe}_Categories_UD08.csv")
                 write_csv(df_cat08, path08)
                 written["UD08_Categories"] = path08
             
-            df_cat11 = build_category_ud11_for_parent(company, part_id, cat_site, cat_str)
-            path11 = os.path.join(out_dir, f"{part_id}_Categories_UD11.csv")
+            df_cat11_list = [build_category_ud11_for_parent(company, part_id, cat_site, cat_str) for cat_str in cat_list]
+            df_cat11 = pd.concat(df_cat11_list, ignore_index=True)
+            path11 = os.path.join(out_dir, f"{part_id_safe}_Categories_UD11.csv")
             write_csv(df_cat11, path11)
             written["UD11_Categories"] = path11
     
@@ -403,7 +422,7 @@ def run_new_pdp_mode() -> None:
         playlist_entries.append((path, "add"))
     
     df_playlist = build_playlist_df(playlist_entries, set())
-    playlist_path = os.path.join(os.path.dirname(out_dir), f"ADD_{part_id}_PLAYLIST.csv")
+    playlist_path = os.path.join(os.path.dirname(out_dir), f"ADD_{part_id_safe}_PLAYLIST.csv")
     df_playlist.to_csv(playlist_path, index=False, encoding='utf-8-sig')
     
     celebrate_success(out_dir, playlist_path)
@@ -499,8 +518,12 @@ def run() -> None:
                     default="new",
                 ).execute()
                 cat_site = inquirer.select(message="Website for category:", choices=["SA", "SW"], default="SA").execute()
-                cat_str = inquirer.text(message="Category string (Key3):").execute().strip()
-                cat_opts = {"website": cat_site, "category": cat_str, "is_new": cat_type == "new"}
+                cat_input = inquirer.text(
+                    message="Category string(s) - paste multiple categories (one per line):",
+                    multiline=True
+                ).execute().strip()
+                cat_list = [cat.strip() for cat in cat_input.split("\n") if cat.strip()]
+                cat_opts = {"website": cat_site, "categories": cat_list, "is_new": cat_type == "new"}
         else:
             # Select UD09 sort order for attributes
             ud09_sort_map = prompt_attribute_ud09_sort(df11_detect["Key2"].dropna().astype(str).tolist())
@@ -508,10 +531,10 @@ def run() -> None:
     # Prepare category flags for summary
     cat_enabled = bool(cat_opts)
     cat_site = cat_opts.get("website", "") if cat_enabled else ""
-    cat_str = cat_opts.get("category", "") if cat_enabled else ""
+    cat_list = cat_opts.get("categories", []) if cat_enabled else []
     cat_is_new = cat_opts.get("is_new", False) if cat_enabled else False
 
-    if not show_summary(operation, files, import_type, include_tables, part_enabled, variant_parent, website, is_new, part_desc, prod_code, cat_enabled, cat_site, cat_str, cat_is_new):
+    if not show_summary(operation, files, import_type, include_tables, part_enabled, variant_parent, website, is_new, part_desc, prod_code, cat_enabled, cat_site, cat_list, cat_is_new):
         console.print("Cancelled.", style="yellow")
         return
 
