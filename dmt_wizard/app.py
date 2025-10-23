@@ -129,6 +129,39 @@ def prompt_variant_ud09_sort(keys3: List[str]) -> Dict[str, int]:
     return mapping
 
 
+def prompt_attribute_ud09_sort(keys2: List[str]) -> Dict[str, int]:
+    unique_vals = sorted({k for k in keys2 if k is not None and str(k).strip() != ""})
+    if not unique_vals:
+        return {}
+
+    console.print(Panel.fit("Configure UD09 sort order (Number01) for attribute dropdown values.", border_style="cyan"))
+
+    mapping: Dict[str, int] = {}
+    
+    def render_status() -> None:
+        tbl = Table(show_lines=False)
+        tbl.add_column("Value", style="cyan", no_wrap=True)
+        tbl.add_column("Number01", style="white")
+        for v in unique_vals:
+            assigned = mapping.get(v)
+            tbl.add_row(v, "" if assigned is None else str(assigned))
+        console.print(Panel.fit(tbl, title="UD09 values", border_style="blue"))
+
+    for val in unique_vals:
+        try:
+            render_status()
+            order_str = inquirer.text(
+                message=f"Order for '{val}':",
+                validate=lambda r: r.isdigit() and int(r) >= 1,
+                invalid_message="Enter a positive integer",
+            ).execute()
+            mapping[val] = int(order_str)
+        except Exception:
+            # fallback sequential if user escapes
+            mapping[val] = len(mapping) + 1
+    return mapping
+
+
 def show_summary(
     operation: str,
     files: List[str],
@@ -215,7 +248,7 @@ def process_single(
         if import_type == "variant":
             dfs = build_variant_ud_tables(df11_out, ud09_sort_map)
         else:
-            dfs = build_attribute_ud_tables(df11_out)
+            dfs = build_attribute_ud_tables(df11_out, ud09_sort_map)
         progress.update(task, advance=2)
 
         # Write selected tables
@@ -341,6 +374,9 @@ def run() -> None:
                 cat_site = inquirer.select(message="Website for category:", choices=["SA", "SW"], default="SA").execute()
                 cat_str = inquirer.text(message="Category string (Key3):").execute().strip()
                 cat_opts = {"website": cat_site, "category": cat_str, "is_new": cat_type == "new"}
+        else:
+            # Select UD09 sort order for attributes
+            ud09_sort_map = prompt_attribute_ud09_sort(df11_detect["Key2"].dropna().astype(str).tolist())
 
     # Prepare category flags for summary
     cat_enabled = bool(cat_opts)
@@ -382,7 +418,7 @@ def run() -> None:
     include_for_playlist = include_tables.copy()
     df_playlist = build_playlist_df(playlist_entries, include_for_playlist)
     playlist_path = os.path.join(os.path.dirname(playlist_dir), f"{playlist_stem}_PLAYLIST.csv") if playlist_dir else os.path.join(os.path.dirname(files[0]), f"{playlist_stem}_PLAYLIST.csv")
-    df_playlist.to_csv(playlist_path, index=False)
+    df_playlist.to_csv(playlist_path, index=False, encoding='utf-8-sig')
 
     celebrate_success(playlist_dir, playlist_path)
 

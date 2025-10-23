@@ -54,7 +54,7 @@ def ensure_output_dir(base_dir: str, name: str) -> str:
 
 
 def write_csv(df: pd.DataFrame, path: str) -> None:
-    df.to_csv(path, index=False)
+    df.to_csv(path, index=False, encoding='utf-8-sig')
 
 
 def get_stem_and_dir(path: str) -> Tuple[str, str]:

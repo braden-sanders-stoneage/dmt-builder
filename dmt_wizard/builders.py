@@ -54,7 +54,7 @@ def build_variant_ud_tables(df11: pd.DataFrame, ud09_sort_map: dict[str, int] | 
     return {"UD11": ud11, "UD10": ud10, "UD09": ud09, "UD08": ud08}
 
 
-def build_attribute_ud_tables(df11: pd.DataFrame) -> dict[str, pd.DataFrame]:
+def build_attribute_ud_tables(df11: pd.DataFrame, ud09_sort_map: dict[str, int] | None = None) -> dict[str, pd.DataFrame]:
     df11 = _ensure_str(df11, ["Company", "Key1", "Key2", "Key3", "Key4", "Key5"])
 
     ud11 = df11[["Company", "Key1", "Key2", "Key3", "Key4", "Key5"]].copy()
@@ -78,9 +78,24 @@ def build_attribute_ud_tables(df11: pd.DataFrame) -> dict[str, pd.DataFrame]:
     ud09["Checkbox04"] = True
     ud09["Checkbox05"] = True
     ud09 = ud09.drop_duplicates(subset=["Company", "Key1", "Key2"]).reset_index(drop=True)
+    # Number01 sort order for dropdowns
+    if ud09_sort_map:
+        ud09["Number01"] = ud09["Key2"].map(ud09_sort_map)
+    # assign default order for any missing/unmapped values
+    if "Number01" not in ud09.columns:
+        ud09["Number01"] = range(1, len(ud09) + 1)
+    else:
+        # fill any NaNs with sequential order after mapped max
+        max_mapped = int(pd.to_numeric(ud09["Number01"], errors="coerce").fillna(0).max())
+        missing_mask = ud09["Number01"].isna()
+        if missing_mask.any():
+            fill_vals = list(range(max_mapped + 1, max_mapped + 1 + missing_mask.sum()))
+            ud09.loc[missing_mask, "Number01"] = fill_vals
+    # ensure integer dtype
+    ud09["Number01"] = pd.to_numeric(ud09["Number01"], errors="coerce").fillna(0).astype(int)
     ud09 = ud09[[
         "Company", "Key1", "Key2", "Key3", "Key4", "Key5",
-        "Character01", "Checkbox01", "Checkbox02", "Checkbox03", "Checkbox04", "Checkbox05",
+        "Character01", "Checkbox01", "Checkbox02", "Checkbox03", "Checkbox04", "Checkbox05", "Number01",
     ]]
 
     return {"UD11": ud11, "UD10": ud10, "UD09": ud09}
