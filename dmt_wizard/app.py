@@ -20,6 +20,7 @@ from .builders import (
     build_part_table,
     build_category_ud08,
     build_category_ud11_for_parent,
+    build_single_pdp_part,
 )
 from .playlist import build_playlist_df, build_playlist_name
 
@@ -31,6 +32,18 @@ from InquirerPy import inquirer
 
 
 console = Console()
+
+
+def prompt_mode() -> str:
+    choice = inquirer.select(
+        message="Select mode:",
+        choices=[
+            {"name": "Standard Mode", "value": "standard"},
+            {"name": "New PDP Mode", "value": "new_pdp"},
+        ],
+        default="standard",
+    ).execute()
+    return choice
 
 
 def detect_type_from_df(df11: pd.DataFrame) -> str:
@@ -80,20 +93,23 @@ def prompt_tables(import_type: str) -> Set[str]:
     return set(selected)
 
 
-def prompt_part_options() -> Tuple[bool, str, str, bool, str]:
-    create_part = inquirer.confirm(message="Create Part file?", default=True).execute()
-    if not create_part:
-        return False, "", "", False, ""
-
+def prompt_part_details() -> Tuple[str, bool, str, str, str]:
     variant_parent = inquirer.text(message="Variant Parent Part ID:").execute().strip()
+    is_new = inquirer.confirm(message="Is this a new part number?", default=True).execute()
+    
+    part_desc = ""
+    prod_code = ""
+    if is_new:
+        part_desc = inquirer.text(message="PartDescription:").execute().strip()
+        prod_code = inquirer.text(message="ProdCode:").execute().strip()
+    
     website = inquirer.select(
         message="Website:",
         choices=["SA", "SW", "SA~SW"],
         default="SA",
     ).execute()
-    new_pdp = inquirer.confirm(message="Create new PDP?", default=True).execute()
-    prod_code = inquirer.text(message="ProdCode (for new PDP parts):").execute().strip()
-    return True, variant_parent, website, new_pdp, prod_code
+    
+    return variant_parent, is_new, part_desc, prod_code, website
 
 
 def prompt_variant_ud09_sort(keys3: List[str]) -> Dict[str, int]:
@@ -170,7 +186,8 @@ def show_summary(
     part_enabled: bool,
     variant_parent: str,
     website: str,
-    new_pdp: bool,
+    is_new: bool,
+    part_desc: str,
     prod_code: str,
     cat_enabled: bool,
     cat_site: str,
@@ -190,8 +207,9 @@ def show_summary(
         if part_enabled:
             table.add_row("Variant Parent", variant_parent)
             table.add_row("Part Website", website)
-            table.add_row("New PDP?", "Yes" if new_pdp else "No")
-            if new_pdp:
+            table.add_row("New part?", "Yes" if is_new else "No")
+            if is_new:
+                table.add_row("PartDescription", part_desc or "(none)")
                 table.add_row("ProdCode", prod_code or "(none)")
         # Category details
         table.add_row("Category?", "Yes" if cat_enabled else "No")
@@ -227,7 +245,8 @@ def process_single(
     create_part: bool,
     variant_parent: str,
     website: str,
-    new_pdp: bool,
+    is_new: bool,
+    part_desc: str,
     ud09_sort_map: Dict[str, int] | None,
     cat_opts: Dict[str, str] | None,
     prod_code: str,
@@ -261,7 +280,7 @@ def process_single(
 
         # Part (variant + requested, only for add runs, handled by caller)
         if import_type == "variant" and create_part:
-            df_part = build_part_table(df11_out, variant_parent, website, new_pdp, prod_code)
+            df_part = build_part_table(df11_out, variant_parent, website, is_new, part_desc, prod_code)
             csv_path = os.path.join(out_dir, f"{stem}_Part.csv")
             write_csv(df_part, csv_path)
             written["Part"] = csv_path
@@ -291,8 +310,113 @@ def process_single(
     return stem, written
 
 
+def run_new_pdp_mode() -> None:
+    console.print(Panel.fit("New PDP Mode", border_style="magenta"))
+    
+    part_id = inquirer.text(message="Part ID:").execute().strip()
+    if not part_id:
+        console.print("No Part ID provided. Exiting.", style="red")
+        return
+    
+    is_new = inquirer.confirm(message="Is this a new part number?", default=True).execute()
+    
+    part_desc = ""
+    prod_code = ""
+    if is_new:
+        part_desc = inquirer.text(message="PartDescription:").execute().strip()
+        prod_code = inquirer.text(message="ProdCode:").execute().strip()
+    
+    website = inquirer.select(
+        message="Website:",
+        choices=["SA", "SW", "SA~SW"],
+        default="SA",
+    ).execute()
+    
+    cat_opts: Dict[str, str] | None = None
+    if inquirer.confirm(message="Work with categories?", default=False).execute():
+        cat_type = inquirer.select(
+            message="Category type:",
+            choices=[
+                {"name": "New category (create UD08 + UD11)", "value": "new"},
+                {"name": "Existing category (UD11 only)", "value": "existing"},
+            ],
+            default="new",
+        ).execute()
+        cat_site = inquirer.select(message="Website for category:", choices=["SA", "SW"], default="SA").execute()
+        cat_str = inquirer.text(message="Category string (Key3):").execute().strip()
+        cat_opts = {"website": cat_site, "category": cat_str, "is_new": cat_type == "new"}
+    
+    cat_enabled = bool(cat_opts)
+    cat_site = cat_opts.get("website", "") if cat_enabled else ""
+    cat_str = cat_opts.get("category", "") if cat_enabled else ""
+    cat_is_new = cat_opts.get("is_new", False) if cat_enabled else False
+    
+    table = Table(title="Summary", show_lines=False)
+    table.add_column("Field", style="cyan", no_wrap=True)
+    table.add_column("Value", style="white")
+    table.add_row("Mode", "New PDP")
+    table.add_row("Part ID", part_id)
+    table.add_row("New part?", "Yes" if is_new else "No")
+    if is_new:
+        table.add_row("PartDescription", part_desc or "(none)")
+        table.add_row("ProdCode", prod_code or "(none)")
+    table.add_row("Website", website)
+    table.add_row("Category?", "Yes" if cat_enabled else "No")
+    if cat_enabled:
+        table.add_row("Category Type", "New (UD08 + UD11)" if cat_is_new else "Existing (UD11 only)")
+        table.add_row("Category Website", cat_site)
+        table.add_row("Category Path (Key3)", cat_str)
+    
+    console.print(Panel.fit(table, title="Please confirm", border_style="green"))
+    if not inquirer.confirm(message="Proceed?", default=True).execute():
+        console.print("Cancelled.", style="yellow")
+        return
+    
+    import os
+    out_dir = ensure_output_dir(os.getcwd(), f"{part_id}_OUTPUT")
+    written: Dict[str, str] = {}
+    
+    company = "SAINC"
+    df_part = build_single_pdp_part(company, part_id, is_new, part_desc, prod_code, website)
+    part_path = os.path.join(out_dir, f"{part_id}_Part.csv")
+    write_csv(df_part, part_path)
+    written["Part"] = part_path
+    
+    if cat_opts:
+        cat_site = cat_opts.get("website", "").strip()
+        cat_str = cat_opts.get("category", "").strip()
+        cat_is_new = cat_opts.get("is_new", False)
+        if cat_site and cat_str:
+            if cat_is_new:
+                df_cat08 = build_category_ud08(company, cat_site, cat_str)
+                path08 = os.path.join(out_dir, f"{part_id}_Categories_UD08.csv")
+                write_csv(df_cat08, path08)
+                written["UD08_Categories"] = path08
+            
+            df_cat11 = build_category_ud11_for_parent(company, part_id, cat_site, cat_str)
+            path11 = os.path.join(out_dir, f"{part_id}_Categories_UD11.csv")
+            write_csv(df_cat11, path11)
+            written["UD11_Categories"] = path11
+    
+    playlist_entries: List[Tuple[str, str]] = []
+    for path in written.values():
+        playlist_entries.append((path, "add"))
+    
+    df_playlist = build_playlist_df(playlist_entries, set())
+    playlist_path = os.path.join(os.path.dirname(out_dir), f"ADD_{part_id}_PLAYLIST.csv")
+    df_playlist.to_csv(playlist_path, index=False, encoding='utf-8-sig')
+    
+    celebrate_success(out_dir, playlist_path)
+
+
 def run() -> None:
     console.print(Panel.fit("DMT Builder Wizard", border_style="magenta"))
+
+    mode = prompt_mode()
+    
+    if mode == "new_pdp":
+        run_new_pdp_mode()
+        return
 
     # First: source file selection
     console.print(Panel.fit("Select your source Excel file", border_style="yellow"))
@@ -350,7 +474,8 @@ def run() -> None:
     part_enabled = False
     variant_parent = ""
     website = ""
-    new_pdp = False
+    is_new = False
+    part_desc = ""
     prod_code = ""
     cat_opts: Dict[str, str] | None = None
     ud09_sort_map = None
@@ -360,7 +485,9 @@ def run() -> None:
             # Select UD09 sort order BEFORE other prompts
             ud09_sort_map = prompt_variant_ud09_sort(df11_detect["Key3"].dropna().astype(str).tolist())
             # Part first so we have the parent ID
-            part_enabled, variant_parent, website, new_pdp, prod_code = prompt_part_options()
+            part_enabled = inquirer.confirm(message="Create Part file?", default=True).execute()
+            if part_enabled:
+                variant_parent, is_new, part_desc, prod_code, website = prompt_part_details()
             # Category step (optional) – now we can use the parent
             if inquirer.confirm(message="Work with categories?", default=True).execute():
                 cat_type = inquirer.select(
@@ -384,7 +511,7 @@ def run() -> None:
     cat_str = cat_opts.get("category", "") if cat_enabled else ""
     cat_is_new = cat_opts.get("is_new", False) if cat_enabled else False
 
-    if not show_summary(operation, files, import_type, include_tables, part_enabled, variant_parent, website, new_pdp, prod_code, cat_enabled, cat_site, cat_str, cat_is_new):
+    if not show_summary(operation, files, import_type, include_tables, part_enabled, variant_parent, website, is_new, part_desc, prod_code, cat_enabled, cat_site, cat_str, cat_is_new):
         console.print("Cancelled.", style="yellow")
         return
 
@@ -393,20 +520,20 @@ def run() -> None:
 
     # Execute runs
     if operation == "add":
-        stem, written = process_single(files[0], import_type, include_tables, part_enabled, variant_parent, website, new_pdp, ud09_sort_map, cat_opts, prod_code)
+        stem, written = process_single(files[0], import_type, include_tables, part_enabled, variant_parent, website, is_new, part_desc, ud09_sort_map, cat_opts, prod_code)
         playlist_dir = os.path.dirname(list(written.values())[0]) if written else os.path.dirname(files[0])
         for path in written.values():
             playlist_entries.append((path, "add"))
     elif operation == "delete":
-        stem, written = process_single(files[0], import_type, include_tables, False, variant_parent, website, new_pdp, ud09_sort_map, cat_opts, prod_code)
+        stem, written = process_single(files[0], import_type, include_tables, False, variant_parent, website, False, "", ud09_sort_map, cat_opts, "")
         playlist_dir = os.path.dirname(list(written.values())[0]) if written else os.path.dirname(files[0])
         for path in written.values():
             playlist_entries.append((path, "delete"))
     else:  # both
         # delete first
-        del_stem, del_written = process_single(files[0], import_type, include_tables, False, variant_parent, website, new_pdp, ud09_sort_map, cat_opts, prod_code)
+        del_stem, del_written = process_single(files[0], import_type, include_tables, False, variant_parent, website, False, "", ud09_sort_map, cat_opts, "")
         # add second (Part only on add)
-        add_stem, add_written = process_single(files[1], import_type, include_tables, part_enabled, variant_parent, website, new_pdp, ud09_sort_map, cat_opts, prod_code)
+        add_stem, add_written = process_single(files[1], import_type, include_tables, part_enabled, variant_parent, website, is_new, part_desc, ud09_sort_map, cat_opts, prod_code)
         playlist_dir = os.path.dirname(list(del_written.values())[0]) if del_written else os.path.dirname(files[0])
         for path in del_written.values():
             playlist_entries.append((path, "delete"))

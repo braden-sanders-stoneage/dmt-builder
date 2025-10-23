@@ -101,12 +101,12 @@ def build_attribute_ud_tables(df11: pd.DataFrame, ud09_sort_map: dict[str, int] 
     return {"UD11": ud11, "UD10": ud10, "UD09": ud09}
 
 
-def build_part_table(df11: pd.DataFrame, variant_parent: str, website: str, new_pdp: bool, prod_code: str) -> pd.DataFrame:
+def build_part_table(df11: pd.DataFrame, variant_parent: str, website: str, is_new: bool, part_desc: str, prod_code: str) -> pd.DataFrame:
     df11 = _ensure_str(df11, ["Company", "Key2", "Key4"])  # only the needed columns
 
     rows = []
 
-    if new_pdp:
+    if is_new:
         first_key2 = df11["Key2"].iloc[0] if not df11.empty else ""
         rows.append({
             "Company": "SAINC",
@@ -119,8 +119,8 @@ def build_part_table(df11: pd.DataFrame, variant_parent: str, website: str, new_
             "Character11": "",
             "Character12": "show",
             "Character13": website,
-            # New PDP defaults (parent)
-            "PartDescription": "This is a TEMPORARY test part for the DXP",
+            # New part defaults (parent)
+            "PartDescription": part_desc,
             "ClassID": "FG",
             "ProdCode": prod_code,
             "UserChar1": "Introduction",
@@ -138,18 +138,18 @@ def build_part_table(df11: pd.DataFrame, variant_parent: str, website: str, new_
         child["Character11"] = variant_parent
         child["Character12"] = "show"
         child["Character13"] = website
-        if new_pdp:
-            # New PDP defaults (children)
-            child["PartDescription"] = "This is a TEMPORARY test part for the DXP"
+        if is_new:
+            # New part defaults (children)
+            child["PartDescription"] = part_desc
             child["ClassID"] = "FG"
             child["ProdCode"] = prod_code
             child["UserChar1"] = "Introduction"
         child = child[[
             "Company", "PartNum",
-            # Optional new PDP block (will be added later if requested)
+            # Optional new part block (will be added later if requested)
             "Character05", "Character06", "Character08",
             "Checkbox11", "Character10", "Character11", "Character12", "Character13",
-            *(["PartDescription", "ClassID", "ProdCode", "UserChar1"] if new_pdp else []),
+            *(["PartDescription", "ClassID", "ProdCode", "UserChar1"] if is_new else []),
         ]]
         rows.extend(child.to_dict(orient="records"))
 
@@ -158,7 +158,7 @@ def build_part_table(df11: pd.DataFrame, variant_parent: str, website: str, new_
         "Character05", "Character06", "Character08",
         "Checkbox11", "Character10", "Character11", "Character12", "Character13",
     ]
-    extra_cols = ["PartDescription", "ClassID", "ProdCode", "UserChar1"] if new_pdp else []
+    extra_cols = ["PartDescription", "ClassID", "ProdCode", "UserChar1"] if is_new else []
     all_cols = base_cols + extra_cols
     df_part = pd.DataFrame(rows, columns=all_cols)
     return df_part
@@ -193,5 +193,39 @@ def build_category_ud11_for_parent(company: str, parent_part_num: str, website: 
         "Key5": "",
     }]
     return pd.DataFrame(data, columns=["Company", "Key1", "Key2", "Key3", "Key4", "Key5"])
+
+
+def build_single_pdp_part(company: str, part_id: str, is_new: bool, part_desc: str, prod_code: str, website: str) -> pd.DataFrame:
+    if not company:
+        company = "SAINC"
+    
+    row = {
+        "Company": company,
+        "PartNum": part_id,
+        "Character05": part_id,
+        "Character06": "",
+        "Character08": "",
+        "Checkbox11": True,
+        "Character10": "",
+        "Character11": "",
+        "Character12": "show",
+        "Character13": website,
+    }
+    
+    if is_new:
+        row["PartDescription"] = part_desc
+        row["ClassID"] = "FG"
+        row["ProdCode"] = prod_code
+        row["UserChar1"] = "Introduction"
+    
+    base_cols = [
+        "Company", "PartNum",
+        "Character05", "Character06", "Character08",
+        "Checkbox11", "Character10", "Character11", "Character12", "Character13",
+    ]
+    extra_cols = ["PartDescription", "ClassID", "ProdCode", "UserChar1"] if is_new else []
+    all_cols = base_cols + extra_cols
+    
+    return pd.DataFrame([row], columns=all_cols)
 
 
